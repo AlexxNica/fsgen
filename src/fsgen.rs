@@ -24,6 +24,14 @@ use std::fs;
 use std::env;
 use std::process;
 
+struct Config {
+    num_datanodes: u32,
+    num_inodes: u32,
+    out_dir: String,
+    repl: u16,
+    seed: u64,
+}
+
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {} [options]", program);
     println!("fsgen: Generates an HDFS fsimage.\n");
@@ -53,12 +61,12 @@ fn main() {
         return;
     }
     let num_datanodes = match matches.opt_str("d") {
-        None => 4 as u64,
-        Some(val) => val.parse::<u64>().unwrap(),
+        None => 4 as u32,
+        Some(val) => val.parse::<u32>().unwrap(),
     };
     let num_inodes = match matches.opt_str("n") {
-        None => 10000 as u64,
-        Some(val) => val.parse::<u64>().unwrap(),
+        None => 10000 as u32,
+        Some(val) => val.parse::<u32>().unwrap(),
     };
     let out_dir = matches.opt_str("o").unwrap_or("".to_owned());
     if out_dir == "" {
@@ -75,10 +83,12 @@ fn main() {
     };
     // The statements here will be executed when the compiled binary is called
     // Print text to the console
+    let config = Config{num_datanodes: num_datanodes, num_inodes: num_inodes,
+        out_dir: out_dir, repl: repl, seed:seed};
     println!("** fsgen: Generating fsimage with num_datanodes={}, num_inodes={}, \
-        out_dir={}, repl={}, seed={}.", num_datanodes, num_inodes,
-        out_dir, repl, seed);
-    match run(&out_dir) {
+        out_dir={}, repl={}, seed={}.", config.num_datanodes, config.num_inodes,
+        config.out_dir, config.repl, config.seed);
+    match run(&config) {
         Ok(_) => println!("** Done."),
         Err(err) => {
             println!("** ERROR: {:?}", err);
@@ -87,10 +97,10 @@ fn main() {
     }
 } 
 
-fn run(out_dir: &String) -> Result<(), std::io::Error> {
-    if fs::metadata(out_dir).is_ok() {
-        try!(fs::remove_dir_all(out_dir));
-        println!("** deleted existing output directory {}", out_dir)
+fn run(config: &Config) -> Result<(), std::io::Error> {
+    if fs::metadata(config.out_dir.to_owned()).is_ok() {
+        try!(fs::remove_dir_all(config.out_dir.to_owned()));
+        println!("** deleted existing output directory {}", config.out_dir)
     }
     return Result::Ok(());
 }
