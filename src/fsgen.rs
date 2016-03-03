@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::OpenOptions;
 use std::fs;
+use std::fs::File;
 use std::io::BufWriter;
 use std::io::Error;
 use std::io::Write;
@@ -122,8 +123,8 @@ fn print_usage(program: &str, opts: Options) {
 fn run_main(config: &Config) -> Result<(), std::io::Error> {
     let output_dir = OutputDir::new(&config.out_dir);
     try!(output_dir.setup());
-//    let fsimage = FSImage::new(config);
-//    try!(fsimage.writeXml(config.get_fsimage_xml_name()))
+    let fsimage = FSImage::new(config);
+    try!(fsimage.write_xml(&output_dir.get_fsimage_xml_name()));
 //    for datanodeIdx in 0..config.num_datanodes {
 //        try!(fsimage.generate_datanode_dir(datanodeIdx))
 //    }
@@ -225,137 +226,145 @@ impl OutputDir {
     }
 }
 
-//// Represents the FSImage which we will be writing to disk.
-//struct FSImage {
-//    // The FSGen configuration.
-//    config: Config,
-//
+// Represents the FSImage which we will be writing to disk.
+struct FSImage<'a> {
+    // The FSGen configuration.
+    config: & 'a Config,
+
 //    // Maps inode ID to inode information.
 //    inodeMap: HashMap<u32, INode>,
 //
 //    // Maps inode ID to inode children.
 //    children: HashMap<u32, Vec<u32>>,
-//}
-//
-//impl FSImage {
-//    fn new(config: Config) -> FSImage {
-//        return FSImage {
-//            config: config,
-//        }
-//    }
-//
-//    // Write the FSImage XML.
-//    pub fn writeXml(&self, path: &str) -> Result<(), std::io::Error> {
-//        let file = OpenOptions::new().
-//            read(false).
-//            write(true).
-//            create(true).
-//            open(path);
-//        print("<?xml version="1.0"?>");
-//        print("<fsimage>");
-//        try!(self.writeVersionSection());
-//        try!(self.writeNameSection());
-//        try!(self.writeFsImageHeader());
-//        try!(self.writeINodeSection());
-//        print("<INodeReferenceSection></INodeReferenceSection>");
-//        print("<SnapshotSection></SnapshotSection>");
-//        try!(writeINodeDirectorySection());
-//        print("<FileUnderConstructionSection></FileUnderConstructionSection>");
-//        print("<SnapshotDiffSection></SnapshotDiffSection>");
-//        try!(writeSecretManagerSection());
-//        print("<CacheManagerSection></CacheManagerSection>");
-//        print("</fsimage>");
-//    }
-//
-//    // Write the FSImage XML.
-//    fn writeVersionSection(&self) -> Result<(), std::io::Error> {
-//        print("<version>");
-//        print("<layoutVersion>-64</layoutVersion>");
-//        print("<onDiskVersion>1</onDiskVersion>");
-//        print("<oivRevision>545bbef596c06af1c3c8dca1ce29096a64608478</oivRevision>");
-//        print("</version>\n");
-//    }
-//
-//    fn writeNameSection(&self) -> Result<(), std::io::Error> {
-//        print("<NameSection>");
-//        print("<namespaceId>397694258</namespaceId>");
-//        print("<genstampV1>1000</genstampV1>");
-//        print("<genstampV2>1012</genstampV2>");
-//        print("<genstampV1Limit>0</genstampV1Limit>");
-//        print("<lastAllocatedBlockId>1073741836</lastAllocatedBlockId>"); // TODO: what to do about this?
-//        print("<txid>79</txid>");
-//        print("</NameSection>");
-//    }
-//
-//    fn writeINodeSection(&self) -> Result<(), std::io::Error> {
-//        print("<INodeSection>");
-//        print("</INodeSection>");
-//    }
-//
-//    fn writeINodeDirectorySection(&self) -> Result<(), std::io::Error> {
-//        print("<INodeDirectorySection>");
-//        print("</INodeDirectorySection>");
-//    }
-//
-//    fn writeSecretManagerSection(&self) -> Result<(), std::io::Error> {
-//        print("<SecretManagerSection>");
-//        print("<currentId>2</currentId>"); // ???
-//        print("<tokenSequenceNumber>1</tokenSequenceNumber>"); // ???
-//        print("</SecretManagerSection>");
-//    }
-//
-//    // The datanode layout looks like this:
-//    //
-//    // data
-//    // data/current
-//    // data/current/VERSION
-//    // data/current/BP-113955101-127.0.0.1-1455743472614
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/tmp [empty dir]
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/VERSION
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/rbw [empty dir]
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741825
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741826
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741828_1004.meta
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741828
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741825_1001.meta
-//    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741826_1002.meta
-//    //
-//    // Note that block files must be placed based on their IDs. 
-//    fn generate_datanode_dir(&self) -> Result<(), std::io::Error> {
-//        return Result::Ok(());
-//    }
-//}
-//
-//// Represents an HDFS INode (directory or file)
-//struct INode {
-//    id: u32,
-//    name: String,
-//    isDir: bool,
-//}
-//
-//impl INode {
-//    fn get_type_name(&self) -> String {
-//        if self.isDir {
-//            return "DIRECTORY";
-//        } else {
-//            return "FILE";
-//        }
-//    }
-//
-//    pub fn get_inode_section_xml(&self) -> String {
-//        return format!("<inode>\
-//            <id>{}</id>\
-//            <type>{}</type>\
-//            <name>{}</name>\
-//            <mtime>0</mtime>\
-//            <permission>cmccabe:supergroup:0755</permission>\
-//            <nsquota>-1</nsquota>\
-//            <dsquota>-1</dsquota>\
-//            </inode>",
-//            self.id, self.get_type_name(), self.name);
-//    }
-//}
+}
+
+impl<'a> FSImage<'a> {
+    fn new(config: &'a Config) -> FSImage {
+        return FSImage {
+            config: config,
+//            inodeMap: HashMap::new(),
+//            children: HashMap::new(),
+        }
+    }
+
+    // Write the FSImage XML.
+    pub fn write_xml(&self, path: &str) -> Result<(), std::io::Error> {
+        let file = try!(OpenOptions::new().
+            read(false).
+            write(true).
+            create(true).
+            open(path));
+        let mut w = BufWriter::new(&file);
+        try!(write!(w, "<?xml version=\"1.0\"?>"));
+        try!(write!(w, "<fsimage>"));
+        try!(self.write_version_section(&mut w));
+        try!(self.write_name_section(&mut w));
+        try!(self.write_inode_section(&mut w));
+        try!(write!(w, "<INodeReferenceSection></INodeReferenceSection>"));
+        try!(write!(w, "<SnapshotSection></SnapshotSection>"));
+        try!(self.write_inode_directory_section(&mut w));
+        try!(write!(w, "<FileUnderConstructionSection></FileUnderConstructionSection>"));
+        try!(write!(w, "<SnapshotDiffSection></SnapshotDiffSection>"));
+        try!(self.write_secret_manager_section(&mut w));
+        try!(write!(w, "<CacheManagerSection></CacheManagerSection>"));
+        try!(write!(w, "</fsimage>"));
+        return Result::Ok(());
+    }
+
+    // Write the FSImage XML.
+    fn write_version_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
+        try!(write!(w, "<version>"));
+        try!(write!(w, "<layoutVersion>-64</layoutVersion>"));
+        try!(write!(w, "<onDiskVersion>1</onDiskVersion>"));
+        try!(write!(w, "<oivRevision>545bbef596c06af1c3c8dca1ce29096a64608478</oivRevision>"));
+        try!(write!(w, "</version>\n"));
+        return Result::Ok(());
+    }
+
+    fn write_name_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
+        try!(write!(w, "<NameSection>"));
+        try!(write!(w, "<namespaceId>397694258</namespaceId>"));
+        try!(write!(w, "<genstampV1>1000</genstampV1>"));
+        try!(write!(w, "<genstampV2>1012</genstampV2>"));
+        try!(write!(w, "<genstampV1Limit>0</genstampV1Limit>"));
+        try!(write!(w, "<lastAllocatedBlockId>1073741836</lastAllocatedBlockId>")); // TODO: what to do about this?
+        try!(write!(w, "<txid>79</txid>"));
+        try!(write!(w, "</NameSection>"));
+        return Result::Ok(());
+    }
+
+    fn write_inode_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
+        try!(write!(w, "<INodeSection>"));
+        try!(write!(w, "</INodeSection>"));
+        return Result::Ok(());
+    }
+
+    fn write_inode_directory_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
+        try!(write!(w, "<INodeDirectorySection>"));
+        try!(write!(w, "</INodeDirectorySection>"));
+        return Result::Ok(());
+    }
+
+    fn write_secret_manager_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
+        try!(write!(w, "<SecretManagerSection>"));
+        try!(write!(w, "<currentId>2</currentId>")); // ???
+        try!(write!(w, "<tokenSequenceNumber>1</tokenSequenceNumber>")); // ???
+        try!(write!(w, "</SecretManagerSection>"));
+        return Result::Ok(());
+    }
+
+    // The datanode layout looks like this:
+    //
+    // data
+    // data/current
+    // data/current/VERSION
+    // data/current/BP-113955101-127.0.0.1-1455743472614
+    // data/current/BP-113955101-127.0.0.1-1455743472614/tmp [empty dir]
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/VERSION
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/rbw [empty dir]
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741825
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741826
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741828_1004.meta
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741828
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741825_1001.meta
+    // data/current/BP-113955101-127.0.0.1-1455743472614/current/finalized/subdir0/subdir0/blk_1073741826_1002.meta
+    //
+    // Note that block files must be placed based on their IDs. 
+    fn generate_datanode_dir(&self) -> Result<(), std::io::Error> {
+        return Result::Ok(());
+    }
+}
+
+// Represents an HDFS INode (directory or file)
+struct INode {
+    id: u32,
+    name: String,
+    isDir: bool,
+}
+
+impl INode {
+    fn get_type_name(&self) -> &'static str {
+        if self.isDir {
+            return "DIRECTORY";
+        } else {
+            return "FILE";
+        }
+    }
+
+    pub fn get_inode_section_xml(&self) -> String {
+        return format!("<inode>\
+            <id>{}</id>\
+            <type>{}</type>\
+            <name>{}</name>\
+            <mtime>0</mtime>\
+            <permission>cmccabe:supergroup:0755</permission>\
+            <nsquota>-1</nsquota>\
+            <dsquota>-1</dsquota>\
+            </inode>",
+            self.id, self.get_type_name(), self.name);
+    }
+}
