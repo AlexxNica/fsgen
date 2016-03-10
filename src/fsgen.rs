@@ -433,14 +433,20 @@ impl<'a> FSImage<'a> {
     }
 
     pub fn generate_block_files(&self, base_path: &str) -> Result<(), std::io::Error> {
+        let mut files_processed : u32 = 0;
+        let mut replicas_created : u32 = 0;
         for (_, inode) in &self.inode_map {
             if inode.is_dir {
                 continue;
             }
             for block in &inode.blocks {
-                try!(block.generate_block_files(base_path));
+                replicas_created = replicas_created +
+                    try!(block.generate_block_files(base_path));
+                files_processed = files_processed + 1;
             }
         }
+        println!("** generate_block_files: processed {} files.  Created {} replicas.",
+                 files_processed, replicas_created);
         return Result::Ok(());
     }
 
@@ -616,7 +622,7 @@ impl Block {
         return ret;
     }
 
-    pub fn generate_block_files(&self, base_path: &str) -> Result<(), std::io::Error> {
+    pub fn generate_block_files(&self, base_path: &str) -> Result<u32, std::io::Error> {
         for datanode in &self.datanodes {
             let finalized_base = format!("{}/data{}/current/{}/current/finalized",
                                base_path, datanode + 1, BLOCK_POOL_ID);
@@ -629,20 +635,23 @@ impl Block {
                 },
             }
         }
-        return Result::Ok(());
+        return Ok(self.datanodes.len() as u32);
     }
 
     pub fn generate_meta_and_block_file(&self,
                             finalized_base: &str) -> Result<(), std::io::Error> {
+        let subdir = format!("{}/subdir{}/subdir{}",
+            finalized_base, (self.id >> 16) & 0xff, (self.id >> 8) & 0xff);
+        try!(fs::create_dir_all(&subdir));
         // Write empty block data file 
         {
             let data_path = format!("{}/blk_{}_{}",
-                    finalized_base, self.id, self.genstamp);
+                    &subdir, self.id, self.genstamp);
             let file = try!(OpenOptions::new().
                 read(false).
                 write(true).
                 create(true).
-                open(data_path));
+                open(&data_path));
             let mut w = BufWriter::new(&file);
             let arr = [ ];
             try!(w.write(&arr));
@@ -650,12 +659,12 @@ impl Block {
         // Write block header file
         {
             let meta_path = format!("{}/blk_{}_{}.meta",
-                    finalized_base, self.id, self.genstamp);
+                    &subdir, self.id, self.genstamp);
             let file = try!(OpenOptions::new().
                 read(false).
                 write(true).
                 create(true).
-                open(meta_path));
+                open(&meta_path));
             let arr = [ 0x00u8, 0x01u8, 0x02u8, 0x00u8,
                 0x00u8, 0x02u8, 0x00u8, 0x96u8,
                 0x26u8, 0x34u8, 0x7bu8 ];
