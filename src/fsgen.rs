@@ -597,7 +597,7 @@ impl<'a> FSImage<'a> {
         println!("** generating datanode dir {} in {}...",
                  datanode_idx + 1, base_path);
         for storage_idx in 0..self.config.num_storage_dirs_per_dn {
-            let dir = format!("{}/datanode{}/storage{}/current/{}",
+            let dir = format!("{}/datanode{:>02}/storage{:>02}/current/{}",
                  base_path, datanode_idx + 1, storage_idx + 1, BLOCK_POOL_ID);
             try!(fs::create_dir_all(&dir));
             try!(fs::create_dir(format!("{}/tmp", &dir)));
@@ -685,7 +685,7 @@ impl Block {
             let storage_idx = ((self.id as u64) * ((datanode + 1) as u64) * 29) %
                 (num_storage_dirs_per_dn as u64);
             let finalized_base = format!(
-                "{}/datanode{}/storage{}/current/{}/current/finalized",
+                "{}/datanode{:>02}/storage{:>02}/current/{}/current/finalized",
                 base_path, datanode + 1, storage_idx + 1, BLOCK_POOL_ID);
             match self.generate_meta_and_block_file(&finalized_base) {
                 Ok(()) => (),
