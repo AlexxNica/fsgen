@@ -16,24 +16,28 @@
  * limitations under the License.
  */
 
+extern crate crossbeam;
 extern crate getopts;
 extern crate rand;
 
 use getopts::Options;
-use std::collections::HashMap;
-use std::env;
-use std::collections::LinkedList;
+use rand::ChaChaRng;
+use rand::Rng;
 use std::char;
+use std::collections::HashMap;
+use std::collections::LinkedList;
+use std::env;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::fs;
 use std::io::BufWriter;
-use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Write;
 use std::process;
-use rand::ChaChaRng;
-use rand::Rng;
 use std::vec::Vec;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 // Namespace ID of generated fsimage
 // TODO: make configurable
@@ -83,6 +87,7 @@ fn main() {
     opts.optopt("o", "out", "set the output directory", "NAME");
     opts.optopt("r", "repl", "set the replication factor to use", "REPL_FACTOR");
     opts.optopt("s", "seed", "set the random seed to use", "RAND_SEED");
+    opts.optopt("t", "num_threads", "set the number of worker threads to use", "16");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => { m }
         Err(f) => { panic!(f.to_string()) }
@@ -112,13 +117,17 @@ fn main() {
         None => 0xdeadbeef as u64,
         Some(val) => val.parse::<u64>().unwrap(),
     };
+    let num_threads = match matches.opt_str("t") {
+        None => 16 as u32,
+        Some(val) => val.parse::<u32>().unwrap(),
+    };
     if num_datanodes < repl {
         println!("You specified {}x replication, but only {} datanodes.",
                  repl, num_datanodes);
         process::exit(1);
     }
     let config = Config{num_datanodes: num_datanodes, num_inodes: num_inodes,
-        out_dir: out_dir, repl: repl, seed:seed};
+        out_dir: out_dir, repl: repl, seed:seed, num_threads:num_threads};
     println!("** fsgen: Generating fsimage with num_datanodes={}, num_inodes={}, \
         out_dir={}, repl={}, seed={}.", config.num_datanodes, config.num_inodes,
         config.out_dir, config.repl, config.seed);
@@ -178,6 +187,7 @@ struct Config {
     out_dir: String,
     repl: u16,
     seed: u64,
+    num_threads: u32,
 }
 
 // Represents an output directory where we will generate some files.
@@ -265,7 +275,7 @@ impl<'a> FSImage<'a> {
         self.inode_map.insert(ROOT_INODE_ID, root_inode);
         parents.push_back(ROOT_INODE_ID);
         self.num_inodes = self.num_inodes + 1;
-        while true {
+        loop {
             let parent_id = self.find_shallowest_incomplete_dir();
             for i in 0..ENTRIES_PER_DIR {
                 if self.num_inodes > self.config.num_inodes {
@@ -303,7 +313,7 @@ impl<'a> FSImage<'a> {
     }
 
     fn find_shallowest_incomplete_dir(&mut self) -> u32 {
-        while true {
+        loop {
             let id = self.next_possible_empty_dir_id;
             let inode = self.inode_map.get(&id).unwrap();
             if inode.is_dir {
@@ -314,7 +324,6 @@ impl<'a> FSImage<'a> {
             }
             self.next_possible_empty_dir_id = self.next_possible_empty_dir_id + 1;
         }
-        return 0; // unreachable
     }
 
     fn generate_random_block(&mut self, rng: &mut Rng) -> Block {
@@ -433,20 +442,56 @@ impl<'a> FSImage<'a> {
     }
 
     pub fn generate_block_files(&self, base_path: &str) -> Result<(), std::io::Error> {
-        let mut files_processed : u32 = 0;
-        let mut replicas_created : u32 = 0;
-        for (_, inode) in &self.inode_map {
-            if inode.is_dir {
-                continue;
+        let files_processed = Arc::new(AtomicUsize::new(0));
+        let mut threads = vec![];
+        let inode_map = Arc::new(&self.inode_map);
+        let num_threads = self.config.num_threads;
+        {
+            for thread_idx in 0..self.config.num_threads {
+                let inode_map_ref = inode_map.clone();
+                let files_processed_ref = files_processed.clone();
+                // This is actually safe, but the compiler can't prove it to be so.
+                // We join all these threads at the end of the function.
+                //
+                // TODO: it would be nice to avoid this unsafe block.  Probably
+                // the best way to do that would be to move to a channel-based
+                // architecture where worker threads received paths of block
+                // files to create.  Might also be able to do something with
+                // scoped threads?
+                unsafe {
+                    let thread = crossbeam::spawn_unsafe(move|| {
+                        for (_, inode) in inode_map_ref.iter() {
+                            if inode.is_dir {
+                                continue;
+                            }
+                            if inode.id % num_threads != thread_idx {
+                                continue;
+                            }
+                            for block in &inode.blocks {
+                                match block.generate_block_files(base_path) {
+                                    Ok(()) => (),
+                                    Err(e) => {
+                                        println!("Thread {} failed to create block {}: {}",
+                                                 thread_idx, block.id, e);
+                                        //panic!(e);
+                                    }
+                                };
+                            }
+                            let p = files_processed_ref.fetch_add(1, Ordering::Relaxed);
+                            if (p != 0) && (p % 10000) == 0 {
+                                println!("Created {} blocks on disk...", p);
+                            }
+                        }
+                    });
+                    threads.push(thread);
+                }
             }
-            for block in &inode.blocks {
-                replicas_created = replicas_created +
-                    try!(block.generate_block_files(base_path));
-                files_processed = files_processed + 1;
+            for i in threads {
+                let _ = i.join();
             }
         }
-        println!("** generate_block_files: processed {} files.  Created {} replicas.",
-                 files_processed, replicas_created);
+//        println!("** generate_block_files: processed {} files.  Created {} replicas.",
+//                 files_processed, replicas_created);
         return Result::Ok(());
     }
 
@@ -622,7 +667,7 @@ impl Block {
         return ret;
     }
 
-    pub fn generate_block_files(&self, base_path: &str) -> Result<u32, std::io::Error> {
+    pub fn generate_block_files(&self, base_path: &str) -> Result<(), std::io::Error> {
         for datanode in &self.datanodes {
             let finalized_base = format!("{}/data{}/current/{}/current/finalized",
                                base_path, datanode + 1, BLOCK_POOL_ID);
@@ -635,14 +680,28 @@ impl Block {
                 },
             }
         }
-        return Ok(self.datanodes.len() as u32);
+        return Ok(());
     }
 
     pub fn generate_meta_and_block_file(&self,
                             finalized_base: &str) -> Result<(), std::io::Error> {
         let subdir = format!("{}/subdir{}/subdir{}",
             finalized_base, (self.id >> 16) & 0xff, (self.id >> 8) & 0xff);
-        try!(fs::create_dir_all(&subdir));
+        loop {
+            match fs::create_dir_all(&subdir) {
+                Ok(()) => break,
+                // If we get EEXIST, another worker thread already created this
+                // directory or one of its parents while we were attempting to
+                // do so.  We should retry until we no longer get EEXIST, to
+                // ensure that our full path exists (we might have gotten
+                // EEXIST creating a parent rather than the directory we
+                // wanted).
+                Err(ref e) if e.kind() == ErrorKind::AlreadyExists => {
+                    println!("Got EEXIST on {} for {}", finalized_base, self.id);
+                },
+                Err(e) => return Err(e),
+            }
+        }
         // Write empty block data file 
         {
             let data_path = format!("{}/blk_{}_{}",
