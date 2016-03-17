@@ -86,6 +86,7 @@ fn main() {
     opts.optopt("n", "num_inodes", "set the number of inodes to generate", "NUM_INODES");
     opts.optopt("o", "out", "set the output directory", "NAME");
     opts.optopt("r", "repl", "set the replication factor to use", "REPL_FACTOR");
+    opts.optopt("S", "storage_dirs_per_dn", "set the number of storage directories per datanode", "20");
     opts.optopt("s", "seed", "set the random seed to use", "RAND_SEED");
     opts.optopt("t", "num_threads", "set the number of worker threads to use", "16");
     let matches = match opts.parse(&args[1..]) {
@@ -113,6 +114,10 @@ fn main() {
         None => 3 as u16,
         Some(val) => val.parse::<u16>().unwrap(),
     };
+    let num_storage_dirs_per_dn = match matches.opt_str("S") {
+        None => 20 as u16,
+        Some(val) => val.parse::<u16>().unwrap(),
+    };
     let seed = match matches.opt_str("s") {
         None => 0xdeadbeef as u64,
         Some(val) => val.parse::<u64>().unwrap(),
@@ -127,10 +132,12 @@ fn main() {
         process::exit(1);
     }
     let config = Config{num_datanodes: num_datanodes, num_inodes: num_inodes,
-        out_dir: out_dir, repl: repl, seed:seed, num_threads:num_threads};
+        out_dir: out_dir, repl: repl, num_storage_dirs_per_dn: num_storage_dirs_per_dn,
+        seed:seed, num_threads:num_threads};
     println!("** fsgen: Generating fsimage with num_datanodes={}, num_inodes={}, \
-        out_dir={}, repl={}, seed={}.", config.num_datanodes, config.num_inodes,
-        config.out_dir, config.repl, config.seed);
+        out_dir={}, repl={}, num_storage_dirs_per_dn={}, seed={}, num_threads={}",
+        config.num_datanodes, config.num_inodes, config.out_dir, config.repl,
+        config.num_storage_dirs_per_dn, config.seed, config.num_threads);
     let mut rng = ChaChaRng::new_unseeded();
     rng.set_counter(config.seed, config.seed);
     match run_main(&config, &mut rng) {
@@ -173,7 +180,7 @@ fn run_main(config: &Config, rng: &mut Rng) -> Result<(), std::io::Error> {
             "/fsimage_0000000000000000001.xml");
     try!(fsimage.write_xml(fsimage_path));
     println!("** wrote fsimage file {}", fsimage_path);
-    for datanode_idx in 1..config.num_datanodes+1 {
+    for datanode_idx in 0..config.num_datanodes {
         try!(fsimage.generate_datanode_dir(&output_dir.path, datanode_idx));
     }
     try!(fsimage.generate_block_files(&output_dir.path));
@@ -186,6 +193,7 @@ struct Config {
     num_inodes: u32,
     out_dir: String,
     repl: u16,
+    num_storage_dirs_per_dn: u16,
     seed: u64,
     num_threads: u32,
 }
@@ -446,6 +454,7 @@ impl<'a> FSImage<'a> {
         let mut threads = vec![];
         let inode_map = Arc::new(&self.inode_map);
         let num_threads = self.config.num_threads;
+        let num_storage_dirs_per_dn = self.config.num_storage_dirs_per_dn;
         {
             for thread_idx in 0..self.config.num_threads {
                 let inode_map_ref = inode_map.clone();
@@ -468,12 +477,13 @@ impl<'a> FSImage<'a> {
                                 continue;
                             }
                             for block in &inode.blocks {
-                                match block.generate_block_files(base_path) {
+                                match block.generate_block_files(
+                                    base_path, num_storage_dirs_per_dn) {
                                     Ok(()) => (),
                                     Err(e) => {
                                         println!("Thread {} failed to create block {}: {}",
                                                  thread_idx, block.id, e);
-                                        //panic!(e);
+                                        panic!(e);
                                     }
                                 };
                             }
@@ -490,8 +500,8 @@ impl<'a> FSImage<'a> {
                 let _ = i.join();
             }
         }
-//        println!("** generate_block_files: processed {} files.  Created {} replicas.",
-//                 files_processed, replicas_created);
+        println!("** generate_block_files: processed about {} files.",
+                 files_processed.load(Ordering::Relaxed));
         return Result::Ok(());
     }
 
@@ -585,17 +595,19 @@ impl<'a> FSImage<'a> {
     fn generate_datanode_dir(&self, base_path: &str, datanode_idx: u16)
             -> Result<(), std::io::Error> {
         println!("** generating datanode dir {} in {}...",
-                 datanode_idx, base_path);
-        let dir = format!("{}/data{}/current/{}",
-                 base_path, datanode_idx, BLOCK_POOL_ID);
-        try!(fs::create_dir_all(&dir));
-        try!(fs::create_dir(format!("{}/tmp", &dir)));
-        let cdir = format!("{}/current", &dir);
-        try!(fs::create_dir(&cdir));
-        try!(fs::create_dir(format!("{}/rbw", cdir)));
-        try!(fs::create_dir(format!("{}/finalized", cdir)));
+                 datanode_idx + 1, base_path);
+        for storage_idx in 0..self.config.num_storage_dirs_per_dn {
+            let dir = format!("{}/datanode{}/storage{}/current/{}",
+                 base_path, datanode_idx + 1, storage_idx + 1, BLOCK_POOL_ID);
+            try!(fs::create_dir_all(&dir));
+            try!(fs::create_dir(format!("{}/tmp", &dir)));
+            let cdir = format!("{}/current", &dir);
+            try!(fs::create_dir(&cdir));
+            try!(fs::create_dir(format!("{}/rbw", cdir)));
+            try!(fs::create_dir(format!("{}/finalized", cdir)));
+        }
         println!("** finished generating datanode dir {} in {}...",
-                 datanode_idx, base_path);
+                 datanode_idx + 1, base_path);
         return Result::Ok(());
     }
 }
@@ -667,10 +679,14 @@ impl Block {
         return ret;
     }
 
-    pub fn generate_block_files(&self, base_path: &str) -> Result<(), std::io::Error> {
+    pub fn generate_block_files(&self, base_path: &str, num_storage_dirs_per_dn: u16)
+            -> Result<(), std::io::Error> {
         for datanode in &self.datanodes {
-            let finalized_base = format!("{}/data{}/current/{}/current/finalized",
-                               base_path, datanode + 1, BLOCK_POOL_ID);
+            let storage_idx = ((self.id as u64) * ((datanode + 1) as u64) * 29) %
+                (num_storage_dirs_per_dn as u64);
+            let finalized_base = format!(
+                "{}/datanode{}/storage{}/current/{}/current/finalized",
+                base_path, datanode + 1, storage_idx + 1, BLOCK_POOL_ID);
             match self.generate_meta_and_block_file(&finalized_base) {
                 Ok(()) => (),
                 Err(e) => {
