@@ -56,7 +56,7 @@ const BLOCK_POOL_ID : &'static str = "BP-113955101-127.0.0.1-1455743472614";
 const PREFERRED_BLOCK_SIZE : u32 = 134217728;
 
 // The layout version of the generated fsimage
-const LAYOUT_VERSION : i32 = -64;
+const DEFAULT_LAYOUT_VERSION : i32 = -60;
 
 // The first generation stamp to use for blocks.
 const FIRST_GENSTAMP : u32 = 1001;
@@ -89,6 +89,7 @@ fn main() {
     opts.optopt("S", "storage_dirs_per_dn", "set the number of storage directories per datanode", "20");
     opts.optopt("s", "seed", "set the random seed to use", "RAND_SEED");
     opts.optopt("t", "num_threads", "set the number of worker threads to use", "16");
+    opts.optopt("L", "layout_version", "set the layout version to use", "-60");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => { m }
         Err(f) => { panic!(f.to_string()) }
@@ -126,6 +127,14 @@ fn main() {
         None => 16 as u32,
         Some(val) => val.parse::<u32>().unwrap(),
     };
+    let layout_version = match matches.opt_str("L") {
+        None => DEFAULT_LAYOUT_VERSION,
+        Some(val) => val.parse::<i32>().unwrap(),
+    };
+    if layout_version >= 0 {
+        println!("The layout version must be less than 0.");
+        process::exit(1);
+    }
     if num_datanodes < repl {
         println!("You specified {}x replication, but only {} datanodes.",
                  repl, num_datanodes);
@@ -133,7 +142,7 @@ fn main() {
     }
     let config = Config{num_datanodes: num_datanodes, num_inodes: num_inodes,
         out_dir: out_dir, repl: repl, num_storage_dirs_per_dn: num_storage_dirs_per_dn,
-        seed:seed, num_threads:num_threads};
+        seed:seed, num_threads:num_threads, layout_version:layout_version};
     println!("** fsgen: Generating fsimage with num_datanodes={}, num_inodes={}, \
         out_dir={}, repl={}, num_storage_dirs_per_dn={}, seed={}, num_threads={}",
         config.num_datanodes, config.num_inodes, config.out_dir, config.repl,
@@ -196,6 +205,7 @@ struct Config {
     num_storage_dirs_per_dn: u16,
     seed: u64,
     num_threads: u32,
+    layout_version: i32,
 }
 
 // Represents an output directory where we will generate some files.
@@ -374,7 +384,7 @@ impl<'a> FSImage<'a> {
         try!(write!(w, "cTime=1455743472614\n"));
         try!(write!(w, "storageType=NAME_NODE\n"));
         try!(write!(w, "blockpoolID={}\n", BLOCK_POOL_ID));
-        try!(write!(w, "layoutVersion={}\n", LAYOUT_VERSION));
+        try!(write!(w, "layoutVersion={}\n", self.config.layout_version));
         return Result::Ok(());
     }
 
@@ -508,7 +518,7 @@ impl<'a> FSImage<'a> {
     // Write the FSImage XML.
     fn write_version_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
         try!(write!(w, "<version>"));
-        try!(write!(w, "<layoutVersion>{}</layoutVersion>", LAYOUT_VERSION));
+        try!(write!(w, "<layoutVersion>{}</layoutVersion>", self.config.layout_version));
         try!(write!(w, "<onDiskVersion>1</onDiskVersion>"));
         try!(write!(w, "<oivRevision>545bbef596c06af1c3c8dca1ce29096a64608478</oivRevision>"));
         try!(write!(w, "</version>\n"));
