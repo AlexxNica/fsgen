@@ -57,8 +57,11 @@ const BLOCK_POOL_ID : &'static str = "BP-113955101-127.0.0.1-1455743472614";
 // TODO: make configurable
 const PREFERRED_BLOCK_SIZE : u32 = 134217728;
 
-// The layout version of the generated fsimage
-const DEFAULT_LAYOUT_VERSION : i32 = -60;
+// The default datanode layout version of the generated fsimage
+const DEFAULT_DATANODE_LAYOUT_VERSION : i32 = -56;
+
+// The default namenode layout version of the generated fsimage
+const DEFAULT_NAMENODE_LAYOUT_VERSION : i32 = -60;
 
 // The first generation stamp to use for blocks.
 const FIRST_GENSTAMP : u32 = 1001;
@@ -88,10 +91,12 @@ fn main() {
     opts.optopt("n", "num_inodes", "set the number of inodes to generate", "NUM_INODES");
     opts.optopt("o", "out", "set the output directory", "NAME");
     opts.optopt("r", "repl", "set the replication factor to use", "REPL_FACTOR");
-    opts.optopt("S", "storage_dirs_per_dn", "set the number of storage directories per datanode", "20");
+    opts.optopt("S", "storage_dirs_per_dn", "set the number of storage directories per datanode", "NUM_STORAGE_DIRS_PER_DN");
     opts.optopt("s", "seed", "set the random seed to use", "RAND_SEED");
-    opts.optopt("t", "num_threads", "set the number of worker threads to use", "16");
-    opts.optopt("L", "layout_version", "set the layout version to use", "-60");
+    opts.optopt("t", "num_threads", "set the number of worker threads to use", "NUM_THREADS");
+    opts.optopt("L", "namenode_layout_version", "set the NameNode layout version to use", "VERSION");
+    opts.optopt("l", "datanode_layout_version", "set the DataNode layout version to use", 
+                "VERSION");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => { m }
         Err(f) => { panic!(f.to_string()) }
@@ -129,12 +134,20 @@ fn main() {
         None => 16 as u32,
         Some(val) => val.parse::<u32>().unwrap(),
     };
-    let layout_version = match matches.opt_str("L") {
-        None => DEFAULT_LAYOUT_VERSION,
+    let dn_layout_version = match matches.opt_str("l") {
+        None => DEFAULT_DATANODE_LAYOUT_VERSION,
         Some(val) => val.parse::<i32>().unwrap(),
     };
-    if layout_version >= 0 {
-        println!("The layout version must be less than 0.");
+    let nn_layout_version = match matches.opt_str("L") {
+        None => DEFAULT_NAMENODE_LAYOUT_VERSION,
+        Some(val) => val.parse::<i32>().unwrap(),
+    };
+    if dn_layout_version >= 0 {
+        println!("The datanode layout version must be less than 0.");
+        process::exit(1);
+    }
+    if nn_layout_version >= 0 {
+        println!("The namenode layout version must be less than 0.");
         process::exit(1);
     }
     if num_datanodes < repl {
@@ -144,7 +157,9 @@ fn main() {
     }
     let config = Config{num_datanodes: num_datanodes, num_inodes: num_inodes,
         out_dir: out_dir, repl: repl, num_storage_dirs_per_dn: num_storage_dirs_per_dn,
-        seed:seed, num_threads:num_threads, layout_version:layout_version};
+        seed: seed, num_threads: num_threads,
+        dn_layout_version: dn_layout_version,
+        nn_layout_version: nn_layout_version};
     println!("** fsgen: Generating fsimage with num_datanodes={}, num_inodes={}, \
         out_dir={}, repl={}, num_storage_dirs_per_dn={}, seed={}, num_threads={}",
         config.num_datanodes, config.num_inodes, config.out_dir, config.repl,
@@ -207,7 +222,8 @@ struct Config {
     num_storage_dirs_per_dn: u16,
     seed: u64,
     num_threads: u32,
-    layout_version: i32,
+    dn_layout_version: i32,
+    nn_layout_version: i32,
 }
 
 // Represents an output directory where we will generate some files.
@@ -415,7 +431,7 @@ impl<'a> FSImage<'a> {
         try!(write!(w, "cTime=1455743472614\n"));
         try!(write!(w, "storageType=NAME_NODE\n"));
         try!(write!(w, "blockpoolID={}\n", BLOCK_POOL_ID));
-        try!(write!(w, "layoutVersion={}\n", self.config.layout_version));
+        try!(write!(w, "layoutVersion={}\n", self.config.nn_layout_version));
         return Result::Ok(());
     }
 
@@ -549,7 +565,7 @@ impl<'a> FSImage<'a> {
     // Write the FSImage XML.
     fn write_version_section(&self, w: &mut BufWriter<&File>) -> Result<(), std::io::Error> {
         try!(write!(w, "<version>"));
-        try!(write!(w, "<layoutVersion>{}</layoutVersion>", self.config.layout_version));
+        try!(write!(w, "<layoutVersion>{}</layoutVersion>", self.config.nn_layout_version));
         try!(write!(w, "<onDiskVersion>1</onDiskVersion>"));
         try!(write!(w, "<oivRevision>545bbef596c06af1c3c8dca1ce29096a64608478</oivRevision>"));
         try!(write!(w, "</version>\n"));
@@ -675,7 +691,7 @@ impl<'a> FSImage<'a> {
         try!(write!(w, "cTime=0\n"));
         try!(write!(w, "datanodeUuid={}\n", dn_info.datanode_uuid));
         try!(write!(w, "storageType=DATA_NODE\n"));
-        try!(write!(w, "layoutVersion={}\n", self.config.layout_version));
+        try!(write!(w, "layoutVersion={}\n", self.config.dn_layout_version));
         return Result::Ok(());
     }
 
@@ -691,7 +707,7 @@ impl<'a> FSImage<'a> {
         try!(write!(w, "namespaceID={}\n", NAMESPACE_ID));
         try!(write!(w, "cTime=0\n"));
         try!(write!(w, "blockpoolID={}\n", BLOCK_POOL_ID));
-        try!(write!(w, "layoutVersion={}\n", self.config.layout_version));
+        try!(write!(w, "layoutVersion={}\n", self.config.dn_layout_version));
         return Result::Ok(());
     }
 }
