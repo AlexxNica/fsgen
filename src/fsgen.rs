@@ -19,6 +19,7 @@
 extern crate crossbeam;
 extern crate getopts;
 extern crate rand;
+extern crate uuid;
 
 use getopts::Options;
 use rand::ChaChaRng;
@@ -34,10 +35,11 @@ use std::io::BufWriter;
 use std::io::ErrorKind;
 use std::io::Write;
 use std::process;
-use std::vec::Vec;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::vec::Vec;
+use uuid::Uuid;
 
 // Namespace ID of generated fsimage
 // TODO: make configurable
@@ -255,6 +257,17 @@ struct FSImage<'a> {
 
     // The next block id to use.
     next_block_id: u32,
+
+    // Information about the datanodes.
+    datanode_info: Vec<DatanodeInfo>,
+}
+
+struct DatanodeInfo {
+    // The UUID of this DataNode.
+    datanode_uuid: String,
+
+    // The IDs of each storage in this DataNode.
+    storage_ids: Vec<String>,
 }
 
 fn random_str(rng: &mut Rng, len: u32) -> String {
@@ -264,6 +277,23 @@ fn random_str(rng: &mut Rng, len: u32) -> String {
         ret.push(char::from_u32(val + 0x61).unwrap());
     }
     return ret;
+}
+
+fn generate_dn_info(config: &Config) -> Vec<DatanodeInfo> {
+    let mut datanodes : Vec<DatanodeInfo> = vec![];
+    for _ in 0..config.num_datanodes {
+        let mut storage_ids : Vec<String> = vec![];
+        for _ in 0..config.num_storage_dirs_per_dn {
+            storage_ids.push(
+                "DS-".to_owned() + &Uuid::new_v4().to_hyphenated_string());
+        }
+        let datanode = DatanodeInfo {
+            datanode_uuid: Uuid::new_v4().to_hyphenated_string(),
+            storage_ids: storage_ids,
+        };
+        datanodes.push(datanode);
+    }
+    return datanodes;
 }
 
 impl<'a> FSImage<'a> {
@@ -277,6 +307,7 @@ impl<'a> FSImage<'a> {
             num_inodes: 0,
             next_genstamp: FIRST_GENSTAMP,
             next_block_id: FIRST_BLOCK_ID,
+            datanode_info: generate_dn_info(config),
         };
         fs_image.generate(rng);
         return fs_image;
@@ -607,17 +638,60 @@ impl<'a> FSImage<'a> {
         println!("** generating datanode dir {} in {}...",
                  datanode_idx + 1, base_path);
         for storage_idx in 0..self.config.num_storage_dirs_per_dn {
-            let dir = format!("{}/datanode{:>02}/storage{:>02}/current/{}",
-                 base_path, datanode_idx + 1, storage_idx + 1, BLOCK_POOL_ID);
-            try!(fs::create_dir_all(&dir));
-            try!(fs::create_dir(format!("{}/tmp", &dir)));
-            let cdir = format!("{}/current", &dir);
+            let dir = format!("{}/datanode{:>02}/storage{:>02}/current",
+                 base_path, datanode_idx + 1, storage_idx + 1);
+            let bp_dir = format!("{}/{}", dir, BLOCK_POOL_ID);
+            try!(fs::create_dir_all(&bp_dir));
+            try!(self.write_datanode_version_file(&format!("{}/VERSION", dir),
+                                                 datanode_idx, storage_idx));
+
+            try!(fs::create_dir(format!("{}/tmp", &bp_dir)));
+            let cdir = format!("{}/current", &bp_dir);
             try!(fs::create_dir(&cdir));
             try!(fs::create_dir(format!("{}/rbw", cdir)));
             try!(fs::create_dir(format!("{}/finalized", cdir)));
+            try!(self.write_blockpool_version_file(&format!("{}/VERSION", cdir)));
         }
         println!("** finished generating datanode dir {} in {}...",
                  datanode_idx + 1, base_path);
+        return Result::Ok(());
+    }
+
+    // Write the VERSION file which identifies the version of this datanode storage directory.
+    fn write_datanode_version_file(&self, path: &str,
+                        datanode_idx: u16, storage_idx: u16)
+                        -> Result<(), std::io::Error> {
+        let file = try!(OpenOptions::new().
+            read(false).
+            write(true).
+            create(true).
+            open(path));
+        let mut w = BufWriter::new(&file);
+        let dn_info = self.datanode_info.get(datanode_idx as usize).unwrap();
+        try!(write!(w, "#Thu Feb 18 11:20:35 PST 2016\n"));
+        try!(write!(w, "storageID={}\n",
+                    dn_info.storage_ids.get(storage_idx as usize).unwrap()));
+        try!(write!(w, "clusterID={}\n", CLUSTER_ID));
+        try!(write!(w, "cTime=0\n"));
+        try!(write!(w, "datanodeUuid={}\n", dn_info.datanode_uuid));
+        try!(write!(w, "storageType=DATA_NODE\n"));
+        try!(write!(w, "layoutVersion={}\n", self.config.layout_version));
+        return Result::Ok(());
+    }
+
+    fn write_blockpool_version_file(&self, path: &str)
+                        -> Result<(), std::io::Error> {
+        let file = try!(OpenOptions::new().
+            read(false).
+            write(true).
+            create(true).
+            open(path));
+        let mut w = BufWriter::new(&file);
+        try!(write!(w, "#Thu Feb 18 11:20:35 PST 2016\n"));
+        try!(write!(w, "namespaceID={}\n", NAMESPACE_ID));
+        try!(write!(w, "cTime=0\n"));
+        try!(write!(w, "blockpoolID={}\n", BLOCK_POOL_ID));
+        try!(write!(w, "layoutVersion={}\n", self.config.layout_version));
         return Result::Ok(());
     }
 }
