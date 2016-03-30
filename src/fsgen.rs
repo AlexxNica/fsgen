@@ -53,6 +53,10 @@ static CLUSTER_ID : &'static str = "CID-4d05b066-8649-49c7-80cf-49ed7eac011c";
 // TODO: make configurable
 const BLOCK_POOL_ID : &'static str = "BP-113955101-127.0.0.1-1455743472614";
 
+// The cluster creation time.  This must be the same on NN and DNs.
+// TODO: make configurable
+const CLUSTER_CTIME : u64 = 1455743472614;
+
 // The preferred block size used by files in this fsimage.
 // TODO: make configurable
 const PREFERRED_BLOCK_SIZE : u32 = 134217728;
@@ -428,7 +432,7 @@ impl<'a> FSImage<'a> {
         try!(write!(w, "#Thu Feb 18 11:20:35 PST 2016\n"));
         try!(write!(w, "namespaceID={}\n", NAMESPACE_ID));
         try!(write!(w, "clusterID={}\n", CLUSTER_ID));
-        try!(write!(w, "cTime=1455743472614\n"));
+        try!(write!(w, "cTime={}\n", CLUSTER_CTIME));
         try!(write!(w, "storageType=NAME_NODE\n"));
         try!(write!(w, "blockpoolID={}\n", BLOCK_POOL_ID));
         try!(write!(w, "layoutVersion={}\n", self.config.nn_layout_version));
@@ -688,7 +692,7 @@ impl<'a> FSImage<'a> {
         try!(write!(w, "storageID={}\n",
                     dn_info.storage_ids.get(storage_idx as usize).unwrap()));
         try!(write!(w, "clusterID={}\n", CLUSTER_ID));
-        try!(write!(w, "cTime=0\n"));
+        try!(write!(w, "cTime={}\n", CLUSTER_CTIME));
         try!(write!(w, "datanodeUuid={}\n", dn_info.datanode_uuid));
         try!(write!(w, "storageType=DATA_NODE\n"));
         try!(write!(w, "layoutVersion={}\n", self.config.dn_layout_version));
@@ -705,7 +709,7 @@ impl<'a> FSImage<'a> {
         let mut w = BufWriter::new(&file);
         try!(write!(w, "#Thu Feb 18 11:20:35 PST 2016\n"));
         try!(write!(w, "namespaceID={}\n", NAMESPACE_ID));
-        try!(write!(w, "cTime=0\n"));
+        try!(write!(w, "cTime={}\n", CLUSTER_CTIME));
         try!(write!(w, "blockpoolID={}\n", BLOCK_POOL_ID));
         try!(write!(w, "layoutVersion={}\n", self.config.dn_layout_version));
         return Result::Ok(());
