@@ -8,6 +8,7 @@ getopts = "0.2"
 rand = "0.3"
 crossbeam = "0.2.5"
 uuid = "0.1.18"
+byteorder = "0.5.1"
 
 [[bin]]
 name = "fsgen"

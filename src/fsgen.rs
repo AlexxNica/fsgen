@@ -16,11 +16,13 @@
  * limitations under the License.
  */
 
+extern crate byteorder;
 extern crate crossbeam;
 extern crate getopts;
 extern crate rand;
 extern crate uuid;
 
+use byteorder::{BigEndian, WriteBytesExt};
 use getopts::Options;
 use rand::ChaChaRng;
 use rand::Rng;
@@ -204,7 +206,7 @@ fn run_main(config: &Config, rng: &mut Rng) -> Result<(), std::io::Error> {
     println!("** wrote seen_txid file {}", seen_txid_path);
     let edits_path = &(output_dir.path.clone() +
             "/name/current/edits_inprogress_0000000000000000001");
-    try!(fsimage.write_edits_file(edits_path));
+    try!(fsimage.write_edits_file(edits_path, config.nn_layout_version));
     println!("** wrote edits file {}", edits_path);
     let fsimage_path = &(output_dir.path.clone() +
             "/fsimage_0000000000000000001.xml");
@@ -455,18 +457,21 @@ impl<'a> FSImage<'a> {
 
     // Write an HDFS edit log file with just the 4-byte layout version and
     // the 4-byte feature flags int (which is always 0).
-    // TODO: use the version constant above to write this.
-    // TODO: write OP_EDIT_LOG_START?
-    pub fn write_edits_file(&self,
-                    path: &str) -> Result<(), std::io::Error> {
+    pub fn write_edits_file(&self, path: &str,
+                nn_layout_version: i32) -> Result<(), std::io::Error> {
         let file = try!(OpenOptions::new().
             read(false).
             write(true).
             create(true).
             open(path));
         let mut w = BufWriter::new(&file);
-        let arr = [ 0xffu8, 0xffu8, 0xffu8, 0xc0u8,
-            0x00u8, 0x00u8, 0x00u8, 0x00u8 ];
+        w.write_i32::<BigEndian>(nn_layout_version).unwrap();
+        let arr = [ 0x00u8, 0x00u8, 0x00u8, 0x00u8,
+                    0x18u8, 0x00u8, 0x00u8, 0x00u8,
+                    0x0cu8, 0x00u8, 0x00u8, 0x00u8,
+                    0x00u8, 0x00u8, 0x00u8, 0x00u8,
+                    0x01u8, 0x70u8, 0x43u8, 0xf0u8,
+                    0xb7u8, 0xffu8, 0xffu8 ];
         try!(w.write(&arr));
         return Result::Ok(());
     }
