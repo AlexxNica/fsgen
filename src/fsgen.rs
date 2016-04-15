@@ -829,8 +829,8 @@ impl Block {
         }
         // Write empty block data file 
         {
-            let data_path = format!("{}/blk_{}_{}",
-                    &subdir, self.id, self.genstamp);
+            let data_path = format!("{}/blk_{}",
+                    &subdir, self.id);
             let file = try!(OpenOptions::new().
                 read(false).
                 write(true).
